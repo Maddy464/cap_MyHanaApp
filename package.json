@@ -22,9 +22,8 @@
   "cds": {
     "requires": {
       "db": "hana",
-      "[production]": {
-        "auth": "mocked"
-      }
+      "auth": "mocked"
+      
     }
   },
   "workspaces": [

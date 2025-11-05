@@ -24,7 +24,7 @@ modules:
         properties:
           srv-url: ${default-url}
     requires:
-      - name: cap_MyHanaApp-auth
+      
       - name: cap_MyHanaApp-db
 
   - name: cap_MyHanaApp-db-deployer
@@ -48,8 +48,7 @@ modules:
         properties:
           name: srv-api # must be used in xs-app.json as well
           url: ~{srv-url}
-          forwardAuthToken: true
-      - name: cap_MyHanaApp-auth
+          forwardAuthToken: true     
     provides:
       - name: app-api
         properties:
@@ -57,22 +56,13 @@ modules:
           app-uri: ${default-uri}
 
 resources:
-  - name: cap_MyHanaApp-auth
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: xsuaa
-      service-plan: application
-      path: ./xs-security.json
-      config:
-        xsappname: cap_MyHanaApp-${org}-${space}
-        tenant-mode: dedicated
-        oauth2-configuration:
-          redirect-uris:
-            - https://*~{app-api/app-uri}/**
-    requires:
-      - name: app-api
+
   - name: cap_MyHanaApp-db
     type: com.sap.xs.hdi-container
     parameters:
       service: hana
       service-plan: hdi-shared
+  - name: sap-approuter-userapi
+    type: org.cloudfoundry.existing-service
+    parameters:
+     service-name: sap-approuter-userapi

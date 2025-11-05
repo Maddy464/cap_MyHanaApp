@@ -449,6 +449,212 @@ annotate service.Interactions_Header with @(
     
 );
 
+## Add User Authentication to Your Application
+
+The UAA will provide user identity, as well as assigned roles and user attributes
+
+In SAP CAPM, user attributes are primarily managed and accessed through the integration with the SAP Authorization and Trust Management Service (XSUAA) and the Application Router.
+
+1. Adding User Attributes:
+
+User attributes in CAPM are not directly "added" within the CAPM application code itself in the same way you might add fields to a database table. Instead, they are typically:
+
+Configured in the Identity Provider (IdP): If you are using a corporate IdP (like SAP Cloud Identity Services or a custom SAML/OIDC provider), user attributes (e.g., email, first name, last name, custom attributes) are defined and managed within that IdP.
+
+Mapped in XSUAA: When integrating with XSUAA, you can configure attribute mappings in the xs-security.json file of your CAPM application. This defines how attributes from your IdP are mapped to XSUAA attributes that your CAPM application can then consume.
+
+    {
+      "xsappname": "mycapmapp",
+      "tenant-mode": "dedicated",
+      "scopes": [
+        // ...
+      ],
+      "attributes": [
+        {
+          "name": "email",
+          "description": "User's email address",
+          "value-type": "string"
+        },
+        {
+          "name": "custom_attribute",
+          "description": "A custom user attribute",
+          "value-type": "string"
+        }
+      ],
+      "role-templates": [
+        {
+          "name": "Viewer",
+          "description": "View access",
+          "scope-references": [
+            "$XSAPPNAME.Viewer"
+          ],
+          "attribute-references": [
+            "email",
+            "custom_attribute"
+          ]
+        }
+      ]
+    }
+
+    Assigned via Role Collections: In the SAP BTP cockpit, administrators assign users to role collections. These role collections are based on role templates defined in xs-security.json and can include references to the defined user attributes. When a user is assigned a role collection, the corresponding attribute values from the IdP are associated with that user's session.
+
+2. Fetching User Attributes in CAPM:
+
+You can fetch user attributes within your CAPM service using the req.user object, which is an instance of cds.User.
+
+Example:
+Consider a CAPM service with the following user-info-service.js:
+
+const cds = require('@sap/cds');
+
+module.exports = async (srv) => {
+    srv.on('userInfo', async (req) => {
+        const user = req.user;
+        const email = user.id; // XSUAA often uses email as the user ID
+        const firstName = user.attr.givenName; // Access attributes mapped in xs-security.json
+        const lastName = user.attr.familyName;
+        const customAttribute = user.attr.custom_attribute; // Access custom attributes
+
+        return {
+            id: user.id,
+            email: email,
+            firstName: firstName,
+            lastName: lastName,
+            customAttribute: customAttribute,
+            isAuthenticated: user.isAuthenticated(),
+            isAdministrator: user.is('Admin') // Check if user has a specific role
+        };
+    });
+};
+
+In this example:
+
+req.user.id typically provides the user's principal identifier (often their email address or a unique ID from the IdP).
+
+req.user.attr.<attribute_name> allows you to access specific attributes that were mapped in xs-security.json and populated from the IdP.
+
+user.isAuthenticated() and user.is('RoleName') are helpful methods for basic authentication and authorization checks.
+
+service UserInfoService {
+    function userInfo() returns {
+        id: String;
+        email: String;
+        firstName: String;
+        lastName: String;
+        customAttribute: String;
+        isAuthenticated: Boolean;
+        isAdministrator: Boolean;
+    };
+}
+
+When a request comes into your CAPM service via the Application Router and XSUAA, the req.user object will be populated with the authenticated user's information, including the mapped attributes.
+
+https://community.sap.com/t5/technology-blog-posts-by-sap/identity-provisioning-service-ips-assigning-custom-attributes-to-ias-users/ba-p/14189767
+
+To map attributes from your Identity Provider (IdP) to XSUAA and consume them in your CAP application, you need to define the attributes in the XSUAA security descriptor, configure the IdP to expose them, and then map them in the BTP cockpit. The CAP application will then receive these attributes in the user's JSON Web Token (JWT). 
+Example Scenario
+
+You want to restrict access to certain data in your CAP application based on the user's country. The user's country is stored as a custom attribute custom_country in your corporate IdP (e.g., SAP Identity Authentication Service - IAS). 
+
+1. Define the attribute in xs-security.json
+
+In your CAP project's xs-security.json file, define the custom attribute under the attributes section:
+
+{
+  "xsappname": "my-cap-app",
+  "tenant-mode": "dedicated",
+  "scopes": [
+    // ... standard scopes
+  ],
+  "attributes": [
+    {
+      "name": "Country",
+      "description": "User's Country for access control",
+      "valueType": "string",
+      "valueRequired": false
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "CountrySpecificRole",
+      "description": "Role with country attribute",
+      "scope-references": [
+        // ... scope references
+      ],
+      "attribute-references": [
+        "Country"
+      ]
+    }
+  ]
+}
+
+After updating, you must recreate and rebind your XSUAA service instance with the updated configuration for the changes to take effect. 
+2. Configure the IdP to expose the attribute
+In your Identity Provider (e.g., SAP IAS tenant):
+Navigate to the Applications section and select the application corresponding to your BTP subaccount.
+Go to the Assertion Attributes tab (or equivalent, depending on the IdP).
+Add a new SAML assertion attribute with the name that matches your IdP's user store (e.g., custom_country or Country).
+Map this attribute to the relevant user attribute in the IdP's user store (e.g., country from the corporate user store). 
+3. Map the IdP attribute to the XSUAA attribute
+In the SAP BTP cockpit for your subaccount:
+Navigate to Security > Role Collections.
+Create a new role collection (e.g., CAP_Country_RoleCollection).
+In the role collection, map the IdP attribute value to the XSUAA attribute value. For example, you can create a condition that assigns this role collection if the user attribute Country from the IdP has the value USA. 
+4. Consume the attribute in the CAP application
+The CAP application receives the user's information, including the assigned roles with their attribute values, in a JWT. You can access this information in your application's backend logic (Node.js or Java) to perform dynamic or instance-based authorization checks. 
+Example (Node.js):
+You can use the @sap/cds-security package to access user information.
+
+srv.on('READ', 'Risks', async (req) => {
+
+    const user = req.user; // User object from the JWT
+    const country = user.attr.Country; // Access the "Country" attribute
+    
+    if (country === 'USA') {
+        // Apply specific logic for US users
+        return await cds.run(SELECT.from('Risks').where({ impact: 'High' }));
+    } else {
+        // Apply logic for other users
+        return await cds.run(SELECT.from('Risks'));
+    }
+
+});
+
+https://help.sap.com/docs/cloud-identity-services/cloud-identity-services/configure-user-attributes-sent-to-application
+In the JWT, you can also access other attributes assigned to the user, enabling you to implement fine-grained access control based on different user roles and attributes. Always ensure to validate and sanitize the user input to prevent security vulnerabilities.
+
+To ensure proper access control, you can implement checks based on user roles and attributes, allowing for tailored responses and data handling depending on the user's identity and permissions.
+
+ For more details on JWT and user attributes, refer to the official SAP documentation on Cloud Identity Services.
+
+cds compile srv/ --to xsuaa > xs-security.json
+
+CLI cf create-service-key MyHANAApp-auth myServiceKey
+cf create-service xsuaa application MyHANAApp-auth -c xs-security.json
+
+cds bind -2 cap_MyHANAApp-auth:default
+
+## Create Calculation View and Expose via CAP (SAP HANA Cloud)
+
+npm install -g hana-cli
+
+hana-cli inspectView -v V_INTERACTION -o cds 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
